@@ -1,0 +1,623 @@
+
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>英文手寫練習板</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #f3f4f6;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            /* 防止在 iPad 上雙擊縮放 */
+            touch-action: manipulation; 
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .writing-box {
+            position: relative;
+            background-color: #fff;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            overflow: hidden;
+            /* 題目之間的垂直間距 (已加大至 4rem = 約 64px) */
+            margin-bottom: 4rem; 
+            border: 2px solid #e5e7eb;
+        }
+
+        /* 四線格背景繪製 */
+        .guidelines {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* 讓點擊事件穿透到 Canvas */
+            background-color: #fff;
+            box-sizing: border-box;
+            padding: 0; 
+            z-index: 0; /* 背景層 */
+        }
+
+        /* 使用 CSS 漸層繪製單一 150px 的區塊：
+        Set 1 (60px, 20px間距) + Gap (30px) + Set 2 (60px, 20px間距)
+        */
+        .guidelines::after {
+            content: '';
+            display: block;
+            width: 100%;
+            height: 100%; 
+            /* 150px 高度的單一圖案 */
+            background-image: linear-gradient(
+                to bottom,
+                /* SET 1 (0 - 60px): 線距變密 (20px) */
+                #3b82f6 0px,      /* Line 1: Top Blue */
+                #3b82f6 1px,
+                transparent 1px,
+                transparent 19px,
+                #3b82f6 19px,      /* Line 2: Mid Blue (20px) */
+                #3b82f6 20px,
+                transparent 20px,
+                transparent 39px,
+                #ef4444 39px,     /* Line 3: Base Red (關鍵基線) (40px) */
+                #ef4444 40px,
+                transparent 40px,
+                transparent 59px,
+                #3b82f6 59px,     /* Line 4: Bottom Blue (Set 1 結束線) (60px) */
+                #3b82f6 60px,
+                
+                /* GAP (60px - 90px) - 30px 寬的透明間隔 */
+                transparent 60px, 
+                transparent 90px, 
+
+                /* SET 2 (90px - 150px): 線距變密 (20px) */
+                #3b82f6 90px,      /* Line 5: Top Blue (Set 2 開始線) */
+                #3b82f6 91px,
+                transparent 91px,
+                transparent 109px,
+                #3b82f6 109px,      /* Line 6: Mid Blue (110px) */
+                #3b82f6 110px,
+                transparent 110px,
+                transparent 129px,
+                #ef4444 129px,     /* Line 7: Base Red (關鍵基線) (130px) */
+                #ef4444 130px,
+                transparent 130px,
+                transparent 149px,
+                #3b82f6 149px,     /* Line 8: Bottom Blue (Set 2 結束線) (150px) */
+                #3b82f6 150px     
+            );
+            background-size: 100% 150px; /* 完整的 150px 高度 */
+            background-repeat: no-repeat;
+            /* 調整背景位置，向下偏移 10px，為第一條線留出空間 */
+            background-position: 0 10px; 
+        }
+
+        canvas {
+            display: block;
+            position: relative; 
+            z-index: 10;        
+            width: 100%;
+            /* 畫布高度調整為 160px，以容納 150px 圖案 + 10px 頂部間距 */
+            height: 160px; 
+            cursor: crosshair;
+            touch-action: none; 
+        }
+
+        .toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 16px;
+            background-color: #f9fafb;
+            border-top: 1px solid #e5e7eb;
+        }
+
+        .question-label {
+            font-weight: bold;
+            color: #374151;
+            font-size: 1.1rem;
+        }
+
+        /* 畫筆控制區樣式 */
+        .pen-controls {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .color-btn, .size-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: 2px solid transparent;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .color-btn.active, .size-btn.active {
+            border-color: #3b82f6; /* Tailwind blue-500 */
+            transform: scale(1.1);
+        }
+
+        .size-btn {
+            background-color: #e5e7eb; /* Tailwind gray-200 */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #374151;
+        }
+    </style>
+</head>
+<body class="pb-20">
+
+    <div class="max-w-3xl mx-auto p-4">
+        <header class="text-center mb-4 mt-2">
+            <h1 class="text-2xl font-bold text-gray-800">英文單字手寫練習</h1>
+            <p class="text-gray-500 text-sm mt-1">線距更緊密 (20px)，頂部有留白，題目間隔已加大</p>
+        </header>
+
+        <!-- 班級和號碼輸入欄位 -->
+        <div class="flex flex-col sm:flex-row justify-center gap-4 mb-6">
+            <div class="flex items-center gap-2 w-full sm:w-auto">
+                <label for="student-class" class="text-gray-700 font-medium whitespace-nowrap">班級:</label>
+                <input type="text" id="student-class" placeholder="例如: A班" class="w-full sm:w-32 border border-gray-300 p-2 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150">
+            </div>
+            <div class="flex items-center gap-2 w-full sm:w-auto">
+                <label for="student-number" class="text-gray-700 font-medium whitespace-nowrap">號碼:</label>
+                <input type="text" id="student-number" placeholder="例如: 12" class="w-full sm:w-32 border border-gray-300 p-2 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150">
+            </div>
+        </div>
+        <!-- 結束：班級和號碼輸入欄位 -->
+
+        <!-- 畫筆控制區 -->
+        <div class="pen-controls">
+            <div class="flex gap-2 items-center">
+                <span class="text-gray-600 text-sm font-medium mr-1">顏色:</span>
+                <button class="color-btn active" style="background-color: #000000;" onclick="setPenColor('#000000', this)"></button>
+                <button class="color-btn" style="background-color: #ef4444;" onclick="setPenColor('#ef4444', this)"></button>
+                <button class="color-btn" style="background-color: #3b82f6;" onclick="setPenColor('#3b82f6', this)"></button>
+                <button class="color-btn" style="background-color: #10b981;" onclick="setPenColor('#10b981', this)"></button>
+                <!-- 新增顏色: 紫色, 粉紅色, 黃色 -->
+                <button class="color-btn" style="background-color: #9333ea;" onclick="setPenColor('#9333ea', this)"></button>
+                <button class="color-btn" style="background-color: #ec4899;" onclick="setPenColor('#ec4899', this)"></button>
+                <button class="color-btn" style="background-color: #f59e0b;" onclick="setPenColor('#f59e0b', this)"></button>
+            </div>
+            <div class="flex gap-2 items-center">
+                <span class="text-gray-600 text-sm font-medium mr-1 ml-4">粗細:</span>
+                <button class="size-btn" onclick="setPenSize(2, this)" style="font-size: 0.8rem;">細</button>
+                <button class="size-btn active" onclick="setPenSize(4, this)" style="font-size: 1rem;">中</button>
+                <button class="size-btn" onclick="setPenSize(8, this)" style="font-size: 1.2rem;">粗</button>
+            </div>
+        </div>
+
+        <!-- Question 1 - 10 結構 -->
+        <!-- Question 1 -->
+        <div class="writing-box">
+            <div class="relative">
+                <div class="guidelines"></div>
+                <canvas id="canvas-1"></canvas>
+            </div>
+            <div class="toolbar">
+                <span class="question-label">1.</span>
+                <button onclick="clearCanvas('canvas-1')" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm font-medium transition">清除</button>
+            </div>
+        </div>
+
+        <!-- Question 2 -->
+        <div class="writing-box">
+            <div class="relative">
+                <div class="guidelines"></div>
+                <canvas id="canvas-2"></canvas>
+            </div>
+            <div class="toolbar">
+                <span class="question-label">2.</span>
+                <button onclick="clearCanvas('canvas-2')" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm font-medium transition">清除</button>
+            </div>
+        </div>
+
+        <!-- Question 3 -->
+        <div class="writing-box">
+            <div class="relative">
+                <div class="guidelines"></div>
+                <canvas id="canvas-3"></canvas>
+            </div>
+            <div class="toolbar">
+                <span class="question-label">3.</span>
+                <button onclick="clearCanvas('canvas-3')" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm font-medium transition">清除</button>
+            </div>
+        </div>
+
+        <!-- Question 4 -->
+        <div class="writing-box">
+            <div class="relative">
+                <div class="guidelines"></div>
+                <canvas id="canvas-4"></canvas>
+            </div>
+            <div class="toolbar">
+                <span class="question-label">4.</span>
+                <button onclick="clearCanvas('canvas-4')" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm font-medium transition">清除</button>
+            </div>
+        </div>
+
+        <!-- Question 5 -->
+        <div class="writing-box">
+            <div class="relative">
+                <div class="guidelines"></div>
+                <canvas id="canvas-5"></canvas>
+            </div>
+            <div class="toolbar">
+                <span class="question-label">5.</span>
+                <button onclick="clearCanvas('canvas-5')" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm font-medium transition">清除</button>
+            </div>
+        </div>
+
+        <!-- Question 6 -->
+        <div class="writing-box">
+            <div class="relative">
+                <div class="guidelines"></div>
+                <canvas id="canvas-6"></canvas>
+            </div>
+            <div class="toolbar">
+                <span class="question-label">6.</span>
+                <button onclick="clearCanvas('canvas-6')" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm font-medium transition">清除</button>
+            </div>
+        </div>
+        
+        <!-- Question 7 -->
+        <div class="writing-box">
+            <div class="relative">
+                <div class="guidelines"></div>
+                <canvas id="canvas-7"></canvas>
+            </div>
+            <div class="toolbar">
+                <span class="question-label">7.</span>
+                <button onclick="clearCanvas('canvas-7')" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm font-medium transition">清除</button>
+            </div>
+        </div>
+        
+        <!-- Question 8 -->
+        <div class="writing-box">
+            <div class="relative">
+                <div class="guidelines"></div>
+                <canvas id="canvas-8"></canvas>
+            </div>
+            <div class="toolbar">
+                <span class="question-label">8.</span>
+                <button onclick="clearCanvas('canvas-8')" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm font-medium transition">清除</button>
+            </div>
+        </div>
+        
+        <!-- Question 9 -->
+        <div class="writing-box">
+            <div class="relative">
+                <div class="guidelines"></div>
+                <canvas id="canvas-9"></canvas>
+            </div>
+            <div class="toolbar">
+                <span class="question-label">9.</span>
+                <button onclick="clearCanvas('canvas-9')" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm font-medium transition">清除</button>
+            </div>
+        </div>
+        
+        <!-- Question 10 -->
+        <div class="writing-box">
+            <div class="relative">
+                <div class="guidelines"></div>
+                <canvas id="canvas-10"></canvas>
+            </div>
+            <div class="toolbar">
+                <span class="question-label">10.</span>
+                <button onclick="clearCanvas('canvas-10')" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm font-medium transition">清除</button>
+            </div>
+        </div>
+        
+        <!-- Bottom Actions -->
+        <div class="fixed bottom-0 left-0 w-full bg-white border-t border-gray-200 p-3 shadow-lg flex justify-center gap-4 z-50">
+            <button onclick="clearAll()" class="bg-red-100 text-red-600 border border-red-200 px-6 py-2 rounded-full font-bold hover:bg-red-200 transition">
+                全部重寫
+            </button>
+            <button onclick="downloadWorksheet()" class="bg-blue-600 text-white px-6 py-2 rounded-full font-bold hover:bg-blue-700 shadow-md transition">
+                下載練習成果
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // 筆刷設定
+        let penColor = "#000000"; // 預設黑色
+        let penWidth = 4;         // 預設中等粗細
+        // 畫布列表 (已更新為 10 題)
+        const CANVASES = ['canvas-1', 'canvas-2', 'canvas-3', 'canvas-4', 'canvas-5', 'canvas-6', 'canvas-7', 'canvas-8', 'canvas-9', 'canvas-10'];
+        
+        // 儲存畫布上下文
+        const contexts = {};
+        const isDrawing = {};
+
+        // 初始化所有 Canvas
+        function init() {
+            CANVASES.forEach(id => {
+                const canvas = document.getElementById(id);
+                // 確保元素存在
+                if (canvas) {
+                    setupCanvas(canvas);
+                }
+            });
+        }
+
+        // 設定筆刷顏色
+        function setPenColor(color, element) {
+            penColor = color;
+            // 更新按鈕樣式
+            document.querySelectorAll('.color-btn').forEach(btn => btn.classList.remove('active'));
+            element.classList.add('active');
+            // 更新所有 Canvas 的 Context 屬性
+            updateAllContexts();
+        }
+
+        // 設定筆刷粗細
+        function setPenSize(size, element) {
+            penWidth = size;
+            // 更新按鈕樣式
+            document.querySelectorAll('.size-btn').forEach(btn => btn.classList.remove('active'));
+            element.classList.add('active');
+            // 更新所有 Canvas 的 Context 屬性
+            updateAllContexts();
+        }
+
+        // 更新所有 Canvas 的 Context 屬性
+        function updateAllContexts() {
+            for (const id in contexts) {
+                if (contexts.hasOwnProperty(id)) {
+                    const ctx = contexts[id];
+                    ctx.strokeStyle = penColor;
+                    ctx.lineWidth = penWidth;
+                }
+            }
+        }
+
+        // 設定單個 Canvas
+        function setupCanvas(canvas) {
+            const ctx = canvas.getContext('2d');
+            const id = canvas.id;
+            
+            contexts[id] = ctx;
+            isDrawing[id] = false;
+
+            // 處理高解析度螢幕 (Retina display) 的模糊問題
+            function resize() {
+                const rect = canvas.getBoundingClientRect();
+                const dpr = window.devicePixelRatio || 1;
+                
+                // 設定實際像數大小
+                canvas.width = rect.width * dpr;
+                canvas.height = rect.height * dpr;
+
+                // 縮放 Context 以符合 CSS 大小
+                ctx.scale(dpr, dpr);
+                
+                // 重設筆刷樣式 (因為 resize 會重置 context 狀態)
+                ctx.lineCap = "round";
+                ctx.lineJoin = "round";
+                ctx.strokeStyle = penColor; // 使用全局變數
+                ctx.lineWidth = penWidth;   // 使用全局變數
+            }
+
+            // 初始大小設定
+            resize();
+            
+            // --- 滑鼠事件 ---
+            canvas.addEventListener('mousedown', startPosition);
+            canvas.addEventListener('mousemove', draw);
+            canvas.addEventListener('mouseup', finishedPosition);
+            canvas.addEventListener('mouseleave', finishedPosition);
+
+            // --- 觸控事件 (iPad/Mobile) ---
+            canvas.addEventListener('touchstart', (e) => {
+                e.preventDefault(); // 防止滾動
+                startPosition(e);
+            }, { passive: false });
+            
+            canvas.addEventListener('touchmove', (e) => {
+                e.preventDefault(); // 防止滾動
+                draw(e);
+            }, { passive: false });
+            
+            canvas.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                finishedPosition();
+            });
+
+            function startPosition(e) {
+                isDrawing[id] = true;
+                
+                // 明確取得起始座標，確保下筆位置準確
+                const rect = canvas.getBoundingClientRect();
+                let clientX, clientY;
+
+                if (e.type.includes('touch')) {
+                    clientX = e.touches[0].clientX;
+                    clientY = e.touches[0].clientY;
+                } else {
+                    clientX = e.clientX;
+                    clientY = e.clientY;
+                }
+
+                const x = clientX - rect.left;
+                const y = clientY - rect.top;
+
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+                
+                // 立即畫一個點 (適用於點擊)
+                ctx.lineTo(x, y);
+                ctx.stroke();
+                // 準備下一個路徑
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+            }
+
+            function finishedPosition() {
+                isDrawing[id] = false;
+                ctx.beginPath(); // 開始新的路徑，避免連線
+            }
+
+            function draw(e) {
+                if (!isDrawing[id]) return;
+
+                const rect = canvas.getBoundingClientRect();
+                let clientX, clientY;
+
+                if (e.type.includes('touch')) {
+                    clientX = e.touches[0].clientX;
+                    clientY = e.touches[0].clientY;
+                } else {
+                    clientX = e.clientX;
+                    clientY = e.clientY;
+                }
+
+                // 計算在 Canvas 中的座標
+                const x = clientX - rect.left;
+                const y = clientY - rect.top;
+
+                ctx.lineTo(x, y);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+            }
+        }
+
+        // 清除單個畫布
+        function clearCanvas(id) {
+            const canvas = document.getElementById(id);
+            if (!canvas) return;
+
+            const ctx = contexts[id];
+            // 使用 resetTransform 來確保清除整個實際像素區域
+            ctx.save();
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.restore();
+            ctx.beginPath();
+        }
+
+        // 清除所有 (已修正，直接執行清除，不使用 window.confirm())
+        function clearAll() {
+            CANVASES.forEach(id => clearCanvas(id));
+        }
+
+        // 下載功能 (更新為分離的兩組四線格)
+        function downloadWorksheet() {
+            // 建立一個暫時的 Canvas 來合併所有內容
+            const tempCanvas = document.createElement('canvas');
+            const firstCanvas = document.getElementById(CANVASES[0]);
+            if (!firstCanvas) return;
+            
+            // 畫布的 CSS 高度已更新為 160px (150px 圖案 + 10px 頂部間距)
+            const cssHeight = 160; 
+            const width = firstCanvas.width; // 實際像素寬度
+            const dpr = firstCanvas.height / cssHeight; // 設備像素比 (e.g., 2)
+            
+            const height = firstCanvas.height; // 實際像素高度 (e.g., 320)
+            const gapCss = 100; // 題目之間的間距 
+            const gapPx = gapCss * dpr; 
+            
+            const numQuestions = CANVASES.length; 
+            const headerSpaceCss = 150;
+            const headerSpacePx = headerSpaceCss * dpr;
+            
+            // 設定總高度 
+            tempCanvas.width = width;
+            tempCanvas.height = (height * numQuestions) + (gapPx * (numQuestions - 1)) + headerSpacePx;
+            
+            const ctx = tempCanvas.getContext('2d');
+            
+            // 填白底
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+
+            // 取得班級和號碼資訊
+            const studentClass = document.getElementById('student-class')?.value || '未填寫';
+            const studentNumber = document.getElementById('student-number')?.value || '未填寫';
+
+            let currentY = 30 * dpr; // Scaled Y start position
+
+            // 繪製標題資訊 (Scaled)
+            ctx.fillStyle = "black";
+            ctx.font = `bold ${30 * dpr}px Arial`;
+            ctx.fillText("英文單字手寫練習", 20 * dpr, currentY);
+            
+            ctx.font = `${18 * dpr}px Arial`;
+            currentY += 40 * dpr;
+            ctx.fillText(`班級: ${studentClass}   號碼: ${studentNumber}`, 20 * dpr, currentY);
+            
+            currentY += 30 * dpr; // 留出間距開始畫布
+
+            // 每個畫布的線條偏移量 (10px 的 CSS 像素)
+            const lineShiftCss = 10;
+            const lineShiftPx = lineShiftCss * dpr;
+
+            CANVASES.forEach((id, index) => {
+                const sourceCanvas = document.getElementById(id);
+                if (!sourceCanvas) return;
+                
+                // 繪製兩組四線格 (共 8 條線，線距 20px，中間有 30px 的間隔)
+                // CSS 像素偏移量: 0, 20, 40(紅線), 60 (Set 1 結束)
+                // 30px Gap (60-90)
+                // 90, 110, 130(紅線), 150 (Set 2 結束)
+                const linePositionsCss = [0, 20, 40, 60, 90, 110, 130, 150]; 
+                const lineColors = ["#3b82f6", "#3b82f6", "#ef4444", "#3b82f6", "#3b82f6", "#3b82f6", "#ef4444", "#3b82f6"]; 
+                
+                // 線條寬度為 1 CSS 像素
+                ctx.lineWidth = 1 * dpr; 
+                
+                linePositionsCss.forEach((posCss, idx) => {
+                    ctx.beginPath();
+                    ctx.strokeStyle = lineColors[idx];
+                    // 計算 Y 座標: 題目起始 Y + (CSS 偏移量 + 10px 額外留白) * DPR
+                    const y = currentY + ((posCss + lineShiftCss) * dpr); 
+                    ctx.moveTo(0, y);
+                    ctx.lineTo(tempCanvas.width, y);
+                    ctx.stroke();
+                });
+
+                // 繪製筆跡 (向下偏移 lineShiftPx)
+                ctx.drawImage(sourceCanvas, 0, currentY + lineShiftPx);
+                
+                // 加上題號 (垂直置中於第一組線格的基線附近，也要考慮 10px 偏移)
+                ctx.font = `${40 * dpr}px Arial`;
+                ctx.fillStyle = "black";
+                // 60px 的線格，中心點是 30px，再加上 10px 頂部留白
+                ctx.fillText((index + 1) + ".", 20 * dpr, currentY + ((30 + lineShiftCss) * dpr));
+
+                currentY += height + gapPx;
+            });
+
+            // 下載
+            const link = document.createElement('a');
+            // 檔名包含班級和號碼
+            link.download = `英文練習成果_${studentClass}_${studentNumber}.png`;
+            link.href = tempCanvas.toDataURL();
+            link.click();
+        }
+
+        // 啟動
+        window.onload = init;
+        
+        // 監聽視窗大小改變 (簡單重整頁面以適應新尺寸，避免筆跡座標跑掉)
+        let resizeTimeout;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(() => {
+                // 提示用戶 resize 可能會影響畫布，這裡不強制重整，只重新計算 scale
+                init(); 
+            }, 200);
+        });
+
+    </script>
+</body>
+</html>
